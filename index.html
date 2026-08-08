@@ -126,9 +126,15 @@
   .dlt{font-size:20px;padding:2px 8px;border-radius:9px;display:inline-block;margin-top:3px}
   .dlt.up{background:rgba(70,200,110,.85)}
   .dlt.dn{background:rgba(240,90,110,.85)}
-  .inibox{display:flex;gap:10px;justify-content:center;margin:14px 0}
-  .inibox input{width:74px;height:88px;text-align:center;font:inherit;font-size:46px;
-    border-radius:16px;border:5px solid #ffb800;background:#fff;color:#3a2a1a;text-transform:uppercase}
+  .inibox{display:flex;gap:10px;justify-content:center;margin:12px 0}
+  .slot{width:64px;height:78px;display:flex;align-items:center;justify-content:center;
+    font-size:42px;border-radius:16px;border:5px solid #e8c98a;background:#fff;color:#3a2a1a}
+  .slot.on{border-color:#ff8a2b;background:#fff6d8;box-shadow:0 0 0 4px rgba(255,138,43,.3)}
+  .keys{display:grid;grid-template-columns:repeat(9,1fr);gap:5px;margin:6px 0 10px}
+  .keys div{pointer-events:auto;background:#fff;border-radius:9px;padding:9px 0;text-align:center;
+    font-size:16px;color:#3a2a1a;box-shadow:0 3px 0 rgba(0,0,0,.15);cursor:pointer}
+  .keys div:active{transform:translateY(2px);box-shadow:none;background:#ffe37a}
+  .keys div.wide{grid-column:span 2;background:#ffd0a8}
   .bhead{display:flex;gap:10px;align-items:center;font-size:13px;color:#8a6a2a;
     letter-spacing:1px;margin:14px 0 5px;text-transform:uppercase}
   .bhead .em{font-size:20px}
@@ -287,10 +293,11 @@
         <h2 style="color:#3a2a1a">🏅 New Record!</h2>
         <p style="color:#5a4a2a;font-size:15px" id="iniSub"></p>
         <div class="inibox">
-          <input id="ini0" maxlength="1" autocomplete="off" inputmode="latin">
-          <input id="ini1" maxlength="1" autocomplete="off" inputmode="latin">
-          <input id="ini2" maxlength="1" autocomplete="off" inputmode="latin">
+          <div class="slot on" id="ini0">A</div>
+          <div class="slot" id="ini1">A</div>
+          <div class="slot" id="ini2">A</div>
         </div>
+        <div class="keys" id="iniKeys"></div>
         <button class="btn green" id="b_inisave">Save to Board</button>
       </div>
     </div>
@@ -1695,53 +1702,89 @@ function renderRecords(){
       el.appendChild(d);
     });
   });
-  if(!Store.ok()){
+  if(Backend.mode==="local"){
     const n=document.createElement("div"); n.className="empty";
     n.style.marginTop="12px";
-    n.textContent="Records only last this session here — open the shared link to keep them.";
+    n.textContent="No storage available here — these times last only this session.";
     el.appendChild(n);
   }
 }
 
-/* initials entry */
-const INI=[0,1,2].map(i=>$("#ini"+i));
-INI.forEach((el,i)=>{
-  el.addEventListener("input",()=>{
-    el.value = (el.value||"").toUpperCase().replace(/[^A-Z0-9]/g,"");
-    if(el.value && i<2) INI[i+1].focus();
+/* initials entry — tapped, not typed. No OS keyboard means no autocorrect,
+   no autofill, and nothing for a phone to "helpfully" rewrite. */
+const INI_SLOTS=[$("#ini0"), $("#ini1"), $("#ini2")];
+let iniChars=["A","A","A"], iniSlot=0;
+
+function paintIni(){
+  INI_SLOTS.forEach((el,i)=>{
+    el.textContent = iniChars[i];
+    el.classList.toggle("on", i===iniSlot);
   });
-  el.addEventListener("keydown",e=>{
-    if(e.key==="Backspace" && !el.value && i>0) INI[i-1].focus();
-    if(e.key==="Enter") submitInitials();
-  });
+}
+INI_SLOTS.forEach((el,i)=>{
+  el.addEventListener("click", ()=>{ iniSlot=i; paintIni(); SFX.tick(); });
 });
+(function buildKeys(){
+  const kb=$("#iniKeys");
+  const chars="ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789".split("");
+  chars.forEach(c=>{
+    const d=document.createElement("div");
+    d.textContent=c;
+    d.addEventListener("click", ()=>{
+      iniChars[iniSlot]=c;
+      if(iniSlot<2) iniSlot++;
+      paintIni(); SFX.tick();
+    });
+    kb.appendChild(d);
+  });
+  const del=document.createElement("div");
+  del.className="wide"; del.textContent="⌫";
+  del.addEventListener("click", ()=>{
+    iniChars[iniSlot]="A";
+    if(iniSlot>0) iniSlot--;
+    paintIni(); SFX.tick();
+  });
+  kb.appendChild(del);
+})();
+
 let PENDING=null;   // {trackId, ms, charId, pts}
 function askInitials(p){
   PENDING=p;
-  const last=(Store.mem["tc:ini"]||"AAA").padEnd(3,"A");
-  INI.forEach((el,i)=>el.value=last[i]);
+  const last=(MY_INI||"AAA").padEnd(3,"A");
+  iniChars=[last[0],last[1],last[2]]; iniSlot=0;
+  paintIni();
   $("#iniSub").textContent = `${TRACKS.find(t=>t.id===p.trackId).name} — ${fmtTime(p.ms)}`;
   $("#hud").classList.remove("on");
   show("#s_ini");
-  setTimeout(()=>{ try{ INI[0].focus(); INI[0].select(); }catch(e){} }, 60);
 }
-async function submitInitials(override){
+function readInitials(){
+  const v = iniChars.join("").toUpperCase().replace(/[^A-Z0-9]/g,"");
+  return (v||"AAA").padEnd(3,"A").slice(0,3);
+}
+async function submitInitials(){
   if(!PENDING){ show("#s_res"); return; }
-  let ini = (override!=null ? String(override)
-            : INI.map(e=>(e.value||"").join?"":"" ).join("")) || "";
-  if(override==null) ini = INI.map(e=>(e.value||"")).join("");
-  ini = ini.toUpperCase().replace(/[^A-Z0-9]/g,"");
-  ini = (ini||"AAA").padEnd(3,"-").slice(0,3);
-  Store.mem["tc:ini"]=ini;
-  Store.set("tc:ini", ini);
+  const ini = readInitials();
+  MY_INI = ini;
+  Backend.mem["tc:rec:__ini"] = {ini};
+  try{
+    if(Backend.mode==="shared"||Backend.mode==="device")
+      window.storage.set("tc:rec:__ini", JSON.stringify({ini}), Backend.mode==="shared");
+    else if(Backend.mode==="upstash")
+      Backend.redis(["SET","tc:rec:__ini",JSON.stringify({ini})]);
+  }catch(e){}
   const p=PENDING; PENDING=null;
+  const btn=$("#b_inisave");
+  btn.textContent="Saving…";
   await saveRecord(p.trackId, ini, p.ms, p.charId, p.pts);
+  btn.textContent="Save to Board";
   SFX.win();
   showResults();
 }
-$("#b_inisave").onclick = submitInitials;
+// NB: wrap in an arrow — passing submitInitials straight to onclick would
+// hand it the click event as its first argument.
+$("#b_inisave").onclick = () => submitInitials();
 
-/* character select UI */
+/* character select UI *//* character select UI */
 let selChar = localStorage.getItem("tc_char") || "mango";
 let selTrack = 0;
 function buildCharGrid(){
@@ -1782,45 +1825,158 @@ buildCharGrid(); buildTrackList();
    which is what lets us show a live time delta rather than just a moving kart. */
 
 const REC = {};                       // trackId -> {board:[], ghost:null}
-const BOARD_MAX = 5;
+const BOARD_MAX = 10;
 const GHOST_HZ = 20;
 
-const Store = {
-  ok(){ return !!(window.storage && window.storage.get); },
+/* Paste Upstash details here ONLY if you are not using the serverless proxy.
+   Anything in this file is visible to anyone who opens the page, so a token
+   here can be used by them to read or wipe your database. The /api/records
+   proxy keeps the token on the server and is the safer option. */
+const CONFIG = {
+  API_PATH: "/api/records",
+  UPSTASH_URL: "",
+  UPSTASH_TOKEN: ""
+};
+
+const Backend = {
+  mode:"local",          // api | upstash | shared | device | local
   mem:{},
-  async get(k){
-    if(!this.ok()) return this.mem[k]!==undefined ? this.mem[k] : null;
-    try{ const r=await window.storage.get(k,false); return JSON.parse(r.value); }
-    catch(e){ return null; }
+  label(){
+    return {api:"Shared board", upstash:"Shared board", shared:"Shared board",
+            device:"This device", local:"This session"}[this.mode];
   },
-  async set(k,v){
-    this.mem[k]=v;
-    if(!this.ok()) return false;
-    try{ await window.storage.set(k, JSON.stringify(v), false); return true; }
-    catch(e){ return false; }
+  shared(){ return this.mode==="api" || this.mode==="upstash" || this.mode==="shared"; },
+
+  async init(){
+    // 1. serverless proxy (token stays on the server)
+    try{
+      const r = await fetch(CONFIG.API_PATH+"?ping=1", {method:"GET"});
+      if(r.ok){ const j=await r.json(); if(j && j.ok){ this.mode="api"; return; } }
+    }catch(e){}
+    // 2. Upstash straight from the page
+    if(CONFIG.UPSTASH_URL && CONFIG.UPSTASH_TOKEN){
+      try{
+        const r=await this.redis(["PING"]);
+        if(r!=null){ this.mode="upstash"; return; }
+      }catch(e){}
+    }
+    // 3. artifact shared storage — everyone on the same link sees one board
+    if(window.storage && window.storage.set){
+      try{
+        await window.storage.set("tc:probe","1",true);
+        this.mode="shared"; return;
+      }catch(e){}
+      try{
+        await window.storage.set("tc:probe","1",false);
+        this.mode="device"; return;
+      }catch(e){}
+    }
+    this.mode="local";
+  },
+
+  async redis(cmd){
+    const r=await fetch(CONFIG.UPSTASH_URL, {
+      method:"POST",
+      headers:{Authorization:"Bearer "+CONFIG.UPSTASH_TOKEN, "Content-Type":"application/json"},
+      body:JSON.stringify(cmd)
+    });
+    if(!r.ok) throw new Error("upstash "+r.status);
+    const j=await r.json();
+    return j.result;
+  },
+
+  key: id => "tc:rec:"+id,
+
+  async load(trackId){
+    const k=this.key(trackId);
+    try{
+      if(this.mode==="api"){
+        const r=await fetch(CONFIG.API_PATH+"?track="+encodeURIComponent(trackId));
+        if(!r.ok) throw 0;
+        return await r.json();
+      }
+      if(this.mode==="upstash"){
+        const v=await this.redis(["GET",k]);
+        return v ? JSON.parse(v) : null;
+      }
+      if(this.mode==="shared"||this.mode==="device"){
+        const r=await window.storage.get(k, this.mode==="shared");
+        return JSON.parse(r.value);
+      }
+    }catch(e){}
+    return this.mem[k]||null;
+  },
+
+  /* Submitting a score sends only the entry, never the whole board, so two
+     people finishing at once can't overwrite each other's times. */
+  async submit(trackId, entry, ghost){
+    const k=this.key(trackId);
+    try{
+      if(this.mode==="api"){
+        const r=await fetch(CONFIG.API_PATH, {
+          method:"POST", headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({track:trackId, entry, ghost})
+        });
+        if(r.ok) return await r.json();
+      }
+      if(this.mode==="upstash"||this.mode==="shared"||this.mode==="device"){
+        const cur = (await this.load(trackId)) || {board:[], ghost:null};
+        const merged = mergeBoard(cur, entry, ghost);
+        if(this.mode==="upstash") await this.redis(["SET",k,JSON.stringify(merged)]);
+        else await window.storage.set(k, JSON.stringify(merged), this.mode==="shared");
+        return merged;
+      }
+    }catch(e){}
+    const cur=this.mem[k]||{board:[],ghost:null};
+    this.mem[k]=mergeBoard(cur, entry, ghost);
+    return this.mem[k];
   }
 };
-const recKey = id => "tc:rec:"+id;
+
+function mergeBoard(cur, entry, ghost){
+  const board=(cur.board||[]).slice();
+  board.push(entry);
+  board.sort((a,b)=>a.ms-b.ms);
+  const out={board:board.slice(0,BOARD_MAX), ghost:cur.ghost||null};
+  if(ghost && ghost.pts && ghost.pts.length && out.board[0] &&
+     out.board[0].ms===entry.ms && out.board[0].ini===entry.ini){
+    out.ghost={ms:entry.ms, ini:entry.ini, ch:entry.ch, pts:ghost.pts};
+  }
+  return out;
+}
+
 function recFor(id){ if(!REC[id]) REC[id]={board:[], ghost:null}; return REC[id]; }
 function bestMs(id){ const b=recFor(id).board; return b.length ? b[0].ms : null; }
+function myBest(id){
+  const b=recFor(id).board.filter(e=>e.ini===MY_INI);
+  return b.length ? b[0].ms : null;
+}
+let MY_INI = "AAA";
 
 async function loadRecords(){
+  await Backend.init();
+  try{
+    const v = await Backend.load("__ini");
+    if(v && v.ini) MY_INI = v.ini;
+  }catch(e){}
   await Promise.all(TRACKS.map(async t=>{
-    const d = await Store.get(recKey(t.id));
+    const d = await Backend.load(t.id);
     REC[t.id] = (d && Array.isArray(d.board)) ? {board:d.board, ghost:d.ghost||null}
                                               : {board:[], ghost:null};
   }));
   renderRecords();
 }
+async function refreshRecords(){
+  await Promise.all(TRACKS.map(async t=>{
+    const d = await Backend.load(t.id);
+    if(d && Array.isArray(d.board)) REC[t.id]={board:d.board, ghost:d.ghost||null};
+  }));
+  renderRecords();
+}
 async function saveRecord(trackId, ini, ms, charId, ghostPts){
-  const r=recFor(trackId);
-  r.board.push({ini, ms:Math.round(ms), ch:charId});
-  r.board.sort((a,b)=>a.ms-b.ms);
-  r.board = r.board.slice(0, BOARD_MAX);
-  if(ghostPts && ghostPts.length && r.board[0].ms===Math.round(ms)){
-    r.ghost = {ms:Math.round(ms), ini, ch:charId, pts:ghostPts};
-  }
-  await Store.set(recKey(trackId), r);
+  const entry={ini, ms:Math.round(ms), ch:charId, at:Date.now()};
+  const merged = await Backend.submit(trackId, entry, ghostPts&&ghostPts.length?{pts:ghostPts}:null);
+  if(merged && Array.isArray(merged.board)) REC[trackId]={board:merged.board, ghost:merged.ghost||null};
   renderRecords();
 }
 
@@ -2649,12 +2805,24 @@ function safeStart(fn){
     e.textContent="Couldn't build that circuit — "+(err&&err.message?err.message:err);
   }
 }
-$("#b_trackok").onclick=()=>safeStart(()=>{
-  RACE.tt = !!ttMode;
-  RACE.start(selTrack, ttMode ? [{id:"me", name:"You", charId:selChar, isLocal:true}]
-                              : soloRoster(), false);
-  prepMini(RACE.track);
-});
+$("#b_trackok").onclick=async ()=>{
+  // pull the newest board first so the ghost you chase is the current record
+  if(ttMode && Backend.shared()){
+    const b=$("#b_trackok"), label=b.textContent;
+    b.textContent="Loading ghost…";
+    try{
+      const d=await Backend.load(TRACKS[selTrack].id);
+      if(d && Array.isArray(d.board)) REC[TRACKS[selTrack].id]={board:d.board, ghost:d.ghost||null};
+    }catch(e){}
+    b.textContent=label;
+  }
+  safeStart(()=>{
+    RACE.tt = !!ttMode;
+    RACE.start(selTrack, ttMode ? [{id:"me", name:"You", charId:selChar, isLocal:true}]
+                                : soloRoster(), false);
+    prepMini(RACE.track);
+  });
+};
 
 let mpMode=false, gpMode=false, ttMode=false;
 $("#b_create").onclick=async ()=>{
