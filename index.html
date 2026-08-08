@@ -119,6 +119,27 @@
   .rrow .pl{width:34px;font-size:19px;color:#e0761a}
   .rrow .em{font-size:22px}
   .rrow .tm{margin-left:auto;font-size:14px;color:#667}
+  .lapbox{position:absolute;left:calc(12px + env(safe-area-inset-left));
+    top:calc(96px + env(safe-area-inset-top));font-size:13px;line-height:1.5;
+    text-shadow:0 2px 0 rgba(0,0,0,.4)}
+  .lapbox b{font-size:17px}
+  .dlt{font-size:20px;padding:2px 8px;border-radius:9px;display:inline-block;margin-top:3px}
+  .dlt.up{background:rgba(70,200,110,.85)}
+  .dlt.dn{background:rgba(240,90,110,.85)}
+  .inibox{display:flex;gap:10px;justify-content:center;margin:14px 0}
+  .inibox input{width:74px;height:88px;text-align:center;font:inherit;font-size:46px;
+    border-radius:16px;border:5px solid #ffb800;background:#fff;color:#3a2a1a;text-transform:uppercase}
+  .bhead{display:flex;gap:10px;align-items:center;font-size:13px;color:#8a6a2a;
+    letter-spacing:1px;margin:14px 0 5px;text-transform:uppercase}
+  .bhead .em{font-size:20px}
+  .brow{display:flex;gap:10px;align-items:center;background:#fff;border-radius:12px;
+    padding:6px 12px;font-size:15px;margin-bottom:4px;color:#233}
+  .brow.top{background:#ffe37a}
+  .brow .pl{width:26px;color:#e0761a}
+  .brow .ini{letter-spacing:2px;width:52px}
+  .brow .tm{margin-left:auto;color:#556}
+  .brow .gh{font-size:11px;background:#8fd6ff;color:#12405e;padding:2px 6px;border-radius:7px}
+  .empty{font-size:13px;font-weight:normal;color:#8a7a5a;padding:5px 2px}
   .gphead{text-align:center;font-size:12px;letter-spacing:2px;color:#8a6a2a;margin:10px 0 4px}
   #gpList{max-height:24vh}
   .err{background:rgba(255,90,120,.9);border-radius:14px;padding:10px 14px;font-size:14px;max-width:460px;text-align:center;font-weight:normal}
@@ -139,8 +160,12 @@
       <p class="sub">Four circuits. Six critters. Grab a power-up and drift the corners.</p>
       <button class="btn green" id="b_solo">🏁 Quick Race</button>
       <button class="btn pink" id="b_gpstart">🏆 Grand Prix</button>
+      <button class="btn blue" id="b_tt">⏱️ Time Trial</button>
       <button class="btn blue" id="b_mp">👫 Play with Friends</button>
-      <button class="btn pink sm" id="b_how">❓ How to Play</button>
+      <div class="row">
+        <button class="btn pink sm" id="b_recs">🏅 Records</button>
+        <button class="btn pink sm" id="b_how">❓ How to Play</button>
+      </div>
     </div>
   </div>
 
@@ -154,6 +179,8 @@
           <b>Drift</b> around corners: hold 🌀 while turning, then let go for a boost. Blue sparks = small boost, orange = big boost.<br>
           <b>Grab boxes</b> ❓ on the track to get a power-up, then tap the big button to use it.<br>
           <b>No walls</b> — you can cut wide, but the further off the road you go the slower you get. Wander too far and you'll be lifted back on.<br><b>Hit the ramps</b> 🟨 for big air. Longer flights land with a bigger boost.<br>
+          <b>Time Trial</b> puts you alone on the circuit against a see-through ghost of the fastest recorded lap. The number under your lap time shows how far ahead (green) or behind (red) that ghost you are.<br>
+          Beat a top-five lap and you enter your initials on that track's record board.<br>
           <b>Grand Prix</b> runs all four circuits back to back, solo or with friends (the host flips <b>Cup: On</b> in the room). Points are 10-8-6-4-3-2, and the most points at the end takes the cup.<br>
           Keyboard: ← → steer, Space drift, E item, S brake.
         </div>
@@ -228,6 +255,7 @@
         <canvas id="mini" width="150" height="150"></canvas>
         <div class="htime" id="raceTime">0:00.0</div>
       </div>
+      <div class="lapbox" id="lapBox"></div>
       <div id="pauseb">⏸</div>
       <div id="cd"></div>
       <div id="toast"></div>
@@ -237,6 +265,33 @@
         <div class="kb brake" id="bBrake">🛑</div>
         <div class="kb drift" id="bDrift">🌀</div>
         <div class="kb item" id="bItem">❓</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- RECORDS -->
+  <div class="screen sky" id="s_recs">
+    <div class="pad">
+      <h2>🏅 Track Records</h2>
+      <p class="sub">Fastest single lap on each circuit.</p>
+      <div class="panel" id="recPanel"></div>
+      <button class="btn" id="b_recsback">Back</button>
+    </div>
+  </div>
+
+  <!-- INITIALS -->
+  <div class="screen" id="s_ini">
+    <div class="veil"></div>
+    <div class="pad">
+      <div class="panel" style="text-align:center">
+        <h2 style="color:#3a2a1a">🏅 New Record!</h2>
+        <p style="color:#5a4a2a;font-size:15px" id="iniSub"></p>
+        <div class="inibox">
+          <input id="ini0" maxlength="1" autocomplete="off" inputmode="latin">
+          <input id="ini1" maxlength="1" autocomplete="off" inputmode="latin">
+          <input id="ini2" maxlength="1" autocomplete="off" inputmode="latin">
+        </div>
+        <button class="btn green" id="b_inisave">Save to Board</button>
       </div>
     </div>
   </div>
@@ -1248,6 +1303,16 @@ class Kart {
       if(this.spinT<=0 && ch.id==="bolt") this.applyBoost(0.5);
     }
 
+    // ---- ghost recording (local only, once racing)
+    if(this.isLocal && RACE.phase==="racing" && RACE.lapStartMs!=null){
+      const tms = performance.now() - RACE.lapStartMs;
+      const buf = RACE.ghostBuf;
+      if(tms>=0 && (!buf.length || tms - buf[buf.length-1][0] >= 1000/GHOST_HZ)){
+        buf.push([Math.round(tms), +this.pos.x.toFixed(1), +this.pos.y.toFixed(1),
+                  +this.pos.z.toFixed(1), +this.yaw.toFixed(3), +this.t.toFixed(4)]);
+      }
+    }
+
     // ---- nose pitch follows the arc
     const wantPitch = this.airborne ? clamp(-this.vy*0.028,-0.45,0.45) : 0;
     this.pitch = lerp(this.pitch, wantPitch, 1-Math.exp(-7*dt));
@@ -1308,6 +1373,7 @@ class Kart {
 
   onLap(track){
     this.lap++;
+    if(this.isLocal && RACE.phase!=="menu") RACE.crossedLine();
     if(this.ch.id==="shelly" && this.lap<=track.laps){ this.shieldT=Math.max(this.shieldT,7); }
     if(this.lap>track.laps && !this.finished){
       this.finished=true;
@@ -1606,6 +1672,75 @@ function updateItemButton(){
   b.style.opacity = (k&&k.item) ? "1" : "0.55";
 }
 
+function renderRecords(){
+  const el=$("#recPanel"); if(!el) return;
+  el.innerHTML="";
+  TRACKS.forEach(t=>{
+    const r=recFor(t.id);
+    const h=document.createElement("div");
+    h.className="bhead";
+    h.innerHTML=`<span class="em">${t.em}</span> ${t.name}`;
+    el.appendChild(h);
+    if(!r.board.length){
+      const e=document.createElement("div"); e.className="empty";
+      e.textContent="No lap set yet — be the first!"; el.appendChild(e); return;
+    }
+    r.board.forEach((b,i)=>{
+      const d=document.createElement("div");
+      d.className="brow"+(i===0?" top":"");
+      d.innerHTML=`<div class="pl">${i+1}</div><div class="em">${CHAR(b.ch).em}</div>`+
+        `<div class="ini">${b.ini}</div>`+
+        (i===0 && r.ghost ? `<div class="gh">GHOST</div>` : "")+
+        `<div class="tm">${fmtTime(b.ms)}</div>`;
+      el.appendChild(d);
+    });
+  });
+  if(!Store.ok()){
+    const n=document.createElement("div"); n.className="empty";
+    n.style.marginTop="12px";
+    n.textContent="Records only last this session here — open the shared link to keep them.";
+    el.appendChild(n);
+  }
+}
+
+/* initials entry */
+const INI=[0,1,2].map(i=>$("#ini"+i));
+INI.forEach((el,i)=>{
+  el.addEventListener("input",()=>{
+    el.value = (el.value||"").toUpperCase().replace(/[^A-Z0-9]/g,"");
+    if(el.value && i<2) INI[i+1].focus();
+  });
+  el.addEventListener("keydown",e=>{
+    if(e.key==="Backspace" && !el.value && i>0) INI[i-1].focus();
+    if(e.key==="Enter") submitInitials();
+  });
+});
+let PENDING=null;   // {trackId, ms, charId, pts}
+function askInitials(p){
+  PENDING=p;
+  const last=(Store.mem["tc:ini"]||"AAA").padEnd(3,"A");
+  INI.forEach((el,i)=>el.value=last[i]);
+  $("#iniSub").textContent = `${TRACKS.find(t=>t.id===p.trackId).name} — ${fmtTime(p.ms)}`;
+  $("#hud").classList.remove("on");
+  show("#s_ini");
+  setTimeout(()=>{ try{ INI[0].focus(); INI[0].select(); }catch(e){} }, 60);
+}
+async function submitInitials(override){
+  if(!PENDING){ show("#s_res"); return; }
+  let ini = (override!=null ? String(override)
+            : INI.map(e=>(e.value||"").join?"":"" ).join("")) || "";
+  if(override==null) ini = INI.map(e=>(e.value||"")).join("");
+  ini = ini.toUpperCase().replace(/[^A-Z0-9]/g,"");
+  ini = (ini||"AAA").padEnd(3,"-").slice(0,3);
+  Store.mem["tc:ini"]=ini;
+  Store.set("tc:ini", ini);
+  const p=PENDING; PENDING=null;
+  await saveRecord(p.trackId, ini, p.ms, p.charId, p.pts);
+  SFX.win();
+  showResults();
+}
+$("#b_inisave").onclick = submitInitials;
+
 /* character select UI */
 let selChar = localStorage.getItem("tc_char") || "mango";
 let selTrack = 0;
@@ -1638,6 +1773,115 @@ function buildTrackList(){
   });
 }
 buildCharGrid(); buildTrackList();
+
+/* ---------------------------------------------------------- records + ghosts
+
+   One key per circuit: tc:rec:<trackId> = { board:[{ini,ms,ch}], ghost:{...} }
+   Board and ghost are written together so a new record costs one storage call.
+   Ghost samples are [ms, x, y, z, yaw, u] where u is 0-1 progress round the lap,
+   which is what lets us show a live time delta rather than just a moving kart. */
+
+const REC = {};                       // trackId -> {board:[], ghost:null}
+const BOARD_MAX = 5;
+const GHOST_HZ = 20;
+
+const Store = {
+  ok(){ return !!(window.storage && window.storage.get); },
+  mem:{},
+  async get(k){
+    if(!this.ok()) return this.mem[k]!==undefined ? this.mem[k] : null;
+    try{ const r=await window.storage.get(k,false); return JSON.parse(r.value); }
+    catch(e){ return null; }
+  },
+  async set(k,v){
+    this.mem[k]=v;
+    if(!this.ok()) return false;
+    try{ await window.storage.set(k, JSON.stringify(v), false); return true; }
+    catch(e){ return false; }
+  }
+};
+const recKey = id => "tc:rec:"+id;
+function recFor(id){ if(!REC[id]) REC[id]={board:[], ghost:null}; return REC[id]; }
+function bestMs(id){ const b=recFor(id).board; return b.length ? b[0].ms : null; }
+
+async function loadRecords(){
+  await Promise.all(TRACKS.map(async t=>{
+    const d = await Store.get(recKey(t.id));
+    REC[t.id] = (d && Array.isArray(d.board)) ? {board:d.board, ghost:d.ghost||null}
+                                              : {board:[], ghost:null};
+  }));
+  renderRecords();
+}
+async function saveRecord(trackId, ini, ms, charId, ghostPts){
+  const r=recFor(trackId);
+  r.board.push({ini, ms:Math.round(ms), ch:charId});
+  r.board.sort((a,b)=>a.ms-b.ms);
+  r.board = r.board.slice(0, BOARD_MAX);
+  if(ghostPts && ghostPts.length && r.board[0].ms===Math.round(ms)){
+    r.ghost = {ms:Math.round(ms), ini, ch:charId, pts:ghostPts};
+  }
+  await Store.set(recKey(trackId), r);
+  renderRecords();
+}
+
+/* ---- the ghost kart: replays a recorded lap ---- */
+class Ghost {
+  constructor(data){
+    this.pts = data.pts || [];
+    this.ms = data.ms; this.ini = data.ini||"---";
+    this.mesh = buildKart(CHAR(data.ch));
+    this.mesh.traverse(n=>{
+      if(!n.material) return;
+      if(n.material===OUTLINE_MAT){ n.visible=false; return; }
+      n.material = n.material.clone();
+      n.material.transparent = true;
+      n.material.opacity = 0.38;
+      n.material.depthWrite = false;
+    });
+    // hide the effect bubbles the recording never used
+    const u=this.mesh.userData;
+    if(u.shield) u.shield.visible=false;
+    if(u.star) u.star.visible=false;
+    if(u.sparks) u.sparks.forEach(sp=>sp.visible=false);
+    if(u.shadow) u.shadow.visible=false;
+    this.mesh.visible=false;
+    world.add(this.mesh);
+    this.i=0;
+  }
+  dispose(){ world.remove(this.mesh); }
+  reset(){ this.i=0; this.mesh.visible=false; }
+  /* position the ghost at lap-time t (ms) */
+  seek(t){
+    const P=this.pts;
+    if(P.length<2){ this.mesh.visible=false; return; }
+    if(t > P[P.length-1][0] + 400){ this.mesh.visible=false; return; }
+    while(this.i < P.length-2 && P[this.i+1][0] <= t) this.i++;
+    while(this.i > 0 && P[this.i][0] > t) this.i--;
+    const a=P[this.i], b=P[Math.min(this.i+1, P.length-1)];
+    const span=(b[0]-a[0])||1;
+    const f=clamp((t-a[0])/span, 0, 1);
+    this.mesh.visible=true;
+    this.mesh.position.set(lerp(a[1],b[1],f), lerp(a[2],b[2],f), lerp(a[3],b[3],f));
+    this.mesh.rotation.y = a[4] + angNorm(b[4]-a[4])*f;
+  }
+  /* what lap-time had the ghost reached this much progress? null if unknown */
+  timeAt(u){
+    const P=this.pts;
+    if(P.length<2) return null;
+    if(u <= P[0][5]) return P[0][0];
+    for(let k=1;k<P.length;k++){
+      const p0=P[k-1], p1=P[k];
+      let a=p0[5], b=p1[5];
+      if(b < a - 0.5) b += 1;              // wrapped past the line
+      let uu=u; if(uu < a - 0.5) uu += 1;
+      if(uu >= a && uu <= b){
+        const f = (b-a)>1e-6 ? (uu-a)/(b-a) : 0;
+        return lerp(p0[0], p1[0], f);
+      }
+    }
+    return P[P.length-1][0];
+  }
+}
 
 /* ---------------------------------------------------------- grand prix */
 const PTS=[10,8,6,4,3,2];
@@ -1719,6 +1963,7 @@ async function mpLeaveCup(){
 
 
 function startGP(){
+  RACE.tt=false;
   GP.active=true; GP.mp=false; GP.finalShown=false; GP.i=0;
   GP.order = TRACKS.map((t,i)=>i);          // the full cup, in order
   GP.points={}; GP.names={}; GP.chars={};
@@ -1764,8 +2009,10 @@ function endCup(){ GP.active=false; GP.finalShown=false; gpMode=false; quitToMen
 /* ---------------------------------------------------------- race controller */
 const RACE = {
   phase:"menu",      // menu | countdown | racing | done
-  karts:[], local:null, track:null, startMs:0, cdT:0, mp:false,
+  karts:[], local:null, track:null, startMs:0, cdT:0, mp:false, tt:false,
   results:null,
+  lapStartMs:null, lapTimes:[], bestLapMs:null,
+  ghostBuf:[], bestLapPts:null, ghost:null, ghostDelta:null,
 
   start(trackIdx, roster, mp){
     clearWorld();
@@ -1786,6 +2033,15 @@ const RACE = {
       if(k.isLocal) this.local=k;
     });
 
+    // lap timing / ghost state
+    this.lapStartMs=null; this.lapTimes=[]; this.bestLapMs=null;
+    this.ghostBuf=[]; this.bestLapPts=null; this.ghostDelta=null;
+    if(this.ghost){ this.ghost.dispose(); this.ghost=null; }
+    if(this.tt){
+      const gd = recFor(def.id).ghost;
+      if(gd && gd.pts && gd.pts.length>4) this.ghost = new Ghost(gd);
+    }
+
     this.phase="countdown"; this.cdT=3.6; this.startMs=performance.now()+3600;
     show("#s_race"); $("#hud").classList.add("on");
     updateItemButton();
@@ -1793,9 +2049,41 @@ const RACE = {
     checkOrientation();
   },
 
+  /* called every time the local kart crosses the start line */
+  crossedLine(){
+    const now=performance.now();
+    const k=this.local;
+    if(this.lapStartMs!=null && k && k.lap>=2){
+      const lt = now - this.lapStartMs;
+      this.lapTimes.push(lt);
+      if(this.bestLapMs==null || lt < this.bestLapMs){
+        this.bestLapMs = lt;
+        this.bestLapPts = this.ghostBuf.slice();
+      }
+      const rec = bestMs(this.track.def.id);
+      if(rec!=null && lt < rec) showToast("NEW RECORD! "+fmtTime(lt));
+      else if(this.lapTimes.length>1 && lt<=this.bestLapMs) showToast("BEST LAP "+fmtTime(lt));
+    }
+    this.lapStartMs = now;
+    this.ghostBuf = [];
+    if(this.ghost) this.ghost.reset();
+  },
+
   onLocalFinish(){
     SFX.win();
     setTimeout(()=>this.finish(), 900);
+  },
+
+  /* a new record shows the initials prompt first, then the results */
+  maybeRecord(){
+    if(this.mp) return false;                       // rooms don't write the local board
+    if(this.bestLapMs==null || !this.local) return false;
+    const id=this.track.def.id, r=recFor(id);
+    const worst = r.board.length>=BOARD_MAX ? r.board[r.board.length-1].ms : Infinity;
+    if(this.bestLapMs >= worst) return false;
+    askInitials({trackId:id, ms:this.bestLapMs, charId:this.local.charId,
+                 pts:this.bestLapPts});
+    return true;
   },
 
   finish(){
@@ -1806,6 +2094,7 @@ const RACE = {
       if(a.finished) return -1; if(b.finished) return 1;
       return b.prog-a.prog;
     });
+    if(this.ghost) this.ghost.reset();
     this.results=order.map((k,i)=>({place:i+1, id:k.id, name:k.name, em:CHAR(k.charId).em,
       time:k.finished?fmtTime(k.finishMs):"DNF", me:k.isLocal}));
     if(GP.active && !GP.mp){
@@ -1815,6 +2104,7 @@ const RACE = {
       });
     }
     if(GP.active && GP.mp && Net.isHost) gpTally();
+    if(this.maybeRecord()) return;          // initials screen calls showResults()
     showResults();
   },
 
@@ -1832,6 +2122,33 @@ const RACE = {
 function showResults(){
   const el=$("#resList"); el.innerHTML="";
   const me=RACE.results.find(r=>r.me);
+
+  if(RACE.tt){
+    const t=RACE.track.def;
+    $("#resTitle").textContent = "⏱️ "+t.name;
+    el.style.maxHeight="";
+    RACE.lapTimes.forEach((lt,i)=>{
+      const d=document.createElement("div");
+      const best = lt===RACE.bestLapMs;
+      d.className="rrow"+(best?" me":"");
+      d.innerHTML=`<div class="pl">L${i+1}</div><div class="em">${best?"⭐":"⏱️"}</div>`+
+        `<div>${best?"Best lap":"Lap "+(i+1)}</div><div class="tm">${fmtTime(lt)}</div>`;
+      el.appendChild(d);
+    });
+    const rec=bestMs(t.id);
+    const r=document.createElement("div");
+    r.className="rrow";
+    r.innerHTML=`<div class="pl">🏅</div><div class="em">👑</div><div>Track record</div>`+
+      `<div class="tm">${rec!=null?fmtTime(rec):"—"}</div>`;
+    el.appendChild(r);
+    $("#gpBlock").style.display="none";
+    $("#gpBtns").style.display="none";
+    $("#resBtns").style.display="";
+    $("#hud").classList.remove("on");
+    show("#s_res");
+    return;
+  }
+
   if(GP.active){
     $("#resTitle").textContent = `Race ${GP.i+1} of ${GP.order.length} · ${TRACKS[GP.order[GP.i]].name}`;
   } else {
@@ -1865,6 +2182,13 @@ function showResults(){
     $("#gpBtns").style.display="none";
     $("#resBtns").style.display="";
   }
+  if(RACE.bestLapMs!=null && !GP.active){
+    const d=document.createElement("div");
+    d.className="rrow";
+    d.innerHTML=`<div class="pl">⏱️</div><div class="em">⭐</div><div>Your best lap</div>`+
+      `<div class="tm">${fmtTime(RACE.bestLapMs)}</div>`;
+    el.appendChild(d);
+  }
   $("#hud").classList.remove("on");
   show("#s_res");
 }
@@ -1881,6 +2205,10 @@ function soloRoster(){
 /* ---------------------------------------------------------- collisions & pickups */
 function collisions(dt){
   const ks=RACE.karts;
+  if(RACE.tt){
+    for(const b of RACE.track.boxes) b.mesh.visible=false;
+    return;                       // time trial: pure driving, no items or bumping
+  }
   // item boxes
   for(const b of RACE.track.boxes){
     if(!b.active){ b.timer-=dt; if(b.timer<=0){ b.active=true; b.mesh.visible=true; } continue; }
@@ -1997,6 +2325,18 @@ function updateHUD(dt){
   $("#posSuf").textContent=SUF(k.place);
   $("#lapNum").textContent=Math.max(1, Math.min(k.lap, RACE.track.laps));
   $("#raceTime").textContent = RACE.phase==="countdown" ? "0:00.0" : fmtTime(performance.now()-RACE.startMs);
+
+  const cur = (RACE.lapStartMs!=null && RACE.phase==="racing") ? performance.now()-RACE.lapStartMs : 0;
+  const rec = bestMs(RACE.track.def.id);
+  let html = "LAP <b>"+fmtTime(cur)+"</b>";
+  if(RACE.bestLapMs!=null) html += "<br>BEST "+fmtTime(RACE.bestLapMs);
+  if(rec!=null) html += "<br>REC "+fmtTime(rec);
+  if(RACE.ghost && RACE.ghostDelta!=null){
+    const d=RACE.ghostDelta, up=d<0;
+    html += '<br><span class="dlt '+(up?"up":"dn")+'">'+(up?"−":"+")+
+            (Math.abs(d)/1000).toFixed(2)+"</span>";
+  }
+  $("#lapBox").innerHTML = html;
   drawMini();
   if(toastT>0){ toastT-=dt; if(toastT<=0) $("#toast").style.opacity="0"; }
 }
@@ -2227,6 +2567,7 @@ function startMultiplayerRace(){
     for(const id in rs){ GP.names[id]=rs[id].n; GP.chars[id]=rs[id].c; }
     Net.pushMeta();
   }
+  RACE.tt=false;
   RACE.start(selTrack, roster, true);
   prepMini(RACE.track);
 }
@@ -2272,10 +2613,13 @@ function applyNetToRace(){
 }
 
 /* ---------------------------------------------------------- screen flow */
-$("#b_solo").onclick=()=>{ SFX.unlock(); Net.on=false; mpMode=false; gpMode=false; show("#s_char"); };
-$("#b_gpstart").onclick=()=>{ SFX.unlock(); Net.on=false; mpMode=false; gpMode=true; show("#s_char"); };
+$("#b_solo").onclick=()=>{ SFX.unlock(); Net.on=false; mpMode=false; gpMode=false; ttMode=false; show("#s_char"); };
+$("#b_tt").onclick=()=>{ SFX.unlock(); Net.on=false; mpMode=false; gpMode=false; ttMode=true; show("#s_char"); };
+$("#b_recs").onclick=()=>{ renderRecords(); show("#s_recs"); };
+$("#b_recsback").onclick=()=>show("#s_title");
+$("#b_gpstart").onclick=()=>{ SFX.unlock(); Net.on=false; mpMode=false; ttMode=false; gpMode=true; show("#s_char"); };
 $("#b_mp").onclick=async ()=>{
-  SFX.unlock(); mpMode=true; gpMode=false;
+  SFX.unlock(); mpMode=true; gpMode=false; ttMode=false;
   show("#s_mp");
   const ok=await Net.test();
   $("#mpErr").style.display = ok ? "none" : "block";
@@ -2285,7 +2629,7 @@ $("#b_how").onclick=()=>show("#s_how");
 $("#b_howback").onclick=()=>show("#s_title");
 $("#b_mpback").onclick=()=>{ Net.leave(); show("#s_title"); };
 $("#b_charback").onclick=()=>{
-  if(gpMode){ show("#s_title"); return; }
+  if(gpMode||ttMode){ show("#s_title"); return; }
   show(mpMode? (Net.on?"#s_lobby":"#s_mp") : "#s_title"); if(Net.on)renderLobby();
 };
 $("#b_charok").onclick=()=>{
@@ -2306,11 +2650,13 @@ function safeStart(fn){
   }
 }
 $("#b_trackok").onclick=()=>safeStart(()=>{
-  RACE.start(selTrack, soloRoster(), false);
+  RACE.tt = !!ttMode;
+  RACE.start(selTrack, ttMode ? [{id:"me", name:"You", charId:selChar, isLocal:true}]
+                              : soloRoster(), false);
   prepMini(RACE.track);
 });
 
-let mpMode=false, gpMode=false;
+let mpMode=false, gpMode=false, ttMode=false;
 $("#b_create").onclick=async ()=>{
   const ok=await Net.test();
   if(!ok){ $("#mpErr").style.display="block"; $("#mpErr").textContent="Rooms aren't available here. Open the shared link for this game, or play Quick Race."; return; }
@@ -2373,7 +2719,11 @@ $("#b_resume").onclick=()=>togglePause();
 $("#b_quit").onclick=()=>quitToMenu();
 $("#b_again").onclick=()=>safeStart(()=>{
   if(RACE.mp){ startMultiplayerRace(); }
-  else { RACE.start(selTrack, soloRoster(), false); prepMini(RACE.track); }
+  else {
+    RACE.start(selTrack, RACE.tt ? [{id:"me", name:"You", charId:selChar, isLocal:true}]
+                                 : soloRoster(), false);
+    prepMini(RACE.track);
+  }
 });
 $("#b_reschar").onclick=()=>{ RACE.phase="menu"; $("#hud").classList.remove("on"); show("#s_char"); };
 $("#b_resmenu").onclick=()=>quitToMenu();
@@ -2391,6 +2741,8 @@ $("#b_gpquit").onclick=()=>{ if(GP.mp) mpLeaveCup(); else endCup(); };
 
 function quitToMenu(){
   GP.active=false; GP.finalShown=false;
+  ttMode=false; RACE.tt=false;
+  if(RACE.ghost){ RACE.ghost.dispose(); RACE.ghost=null; }
   RACE.phase="menu";
   for(const k of RACE.karts) k.dispose();
   RACE.karts=[]; RACE.local=null;
@@ -2442,6 +2794,12 @@ function frame(now){
 
   if(RACE.phase==="countdown"||RACE.phase==="racing"){
     for(const k of RACE.karts) k.update(dt, RACE.track, RACE.karts);
+    if(RACE.ghost && RACE.lapStartMs!=null && RACE.phase==="racing"){
+      const lt = performance.now() - RACE.lapStartMs;
+      RACE.ghost.seek(lt);
+      const gt = RACE.local ? RACE.ghost.timeAt(RACE.local.t) : null;
+      RACE.ghostDelta = (gt==null) ? null : lt - gt;
+    }
     collisions(dt);
     updateRockets(dt);
     syncHazardVisuals(RACE.karts);
@@ -2458,6 +2816,7 @@ function frame(now){
   renderer.render(scene, camera);
 }
 requestAnimationFrame(frame);
+loadRecords();
 
 addEventListener("resize", ()=>{
   renderer.setSize(innerWidth, innerHeight);
