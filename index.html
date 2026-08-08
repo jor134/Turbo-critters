@@ -279,9 +279,12 @@
   <div class="screen sky" id="s_recs">
     <div class="pad">
       <h2>🏅 Track Records</h2>
-      <p class="sub">Fastest single lap on each circuit.</p>
+      <p class="sub" id="recSrc">Fastest single lap on each circuit.</p>
       <div class="panel" id="recPanel"></div>
-      <button class="btn" id="b_recsback">Back</button>
+      <div class="row">
+        <button class="btn sm blue" id="b_recsref">🔄 Refresh</button>
+        <button class="btn sm" id="b_recsback">Back</button>
+      </div>
     </div>
   </div>
 
@@ -1681,6 +1684,14 @@ function updateItemButton(){
 
 function renderRecords(){
   const el=$("#recPanel"); if(!el) return;
+  const src=$("#recSrc");
+  if(src){
+    src.textContent = Backend.shared()
+      ? "Fastest lap on each circuit — everyone racing this link shares one board."
+      : (Backend.mode==="local"
+          ? "Fastest lap on each circuit — not saved anywhere yet."
+          : "Fastest lap on each circuit — saved on this device only.");
+  }
   el.innerHTML="";
   TRACKS.forEach(t=>{
     const r=recFor(t.id);
@@ -1692,20 +1703,21 @@ function renderRecords(){
       const e=document.createElement("div"); e.className="empty";
       e.textContent="No lap set yet — be the first!"; el.appendChild(e); return;
     }
-    r.board.forEach((b,i)=>{
+    r.board.slice(0,5).forEach((b,i)=>{
       const d=document.createElement("div");
       d.className="brow"+(i===0?" top":"");
       d.innerHTML=`<div class="pl">${i+1}</div><div class="em">${CHAR(b.ch).em}</div>`+
-        `<div class="ini">${b.ini}</div>`+
+        `<div class="ini">${b.ini}${b.ini===MY_INI?" ★":""}</div>`+
         (i===0 && r.ghost ? `<div class="gh">GHOST</div>` : "")+
         `<div class="tm">${fmtTime(b.ms)}</div>`;
       el.appendChild(d);
     });
   });
-  if(Backend.mode==="local"){
+  if(!Backend.shared() && Backend.detail){
     const n=document.createElement("div"); n.className="empty";
-    n.style.marginTop="12px";
-    n.textContent="No storage available here — these times last only this session.";
+    n.style.marginTop="12px"; n.style.lineHeight="1.5";
+    n.textContent = (Backend.mode==="local"
+      ? "Times last only this session. " : "Times are kept on this device. ") + Backend.detail;
     el.appendChild(n);
   }
 }
@@ -1771,6 +1783,8 @@ async function submitInitials(){
       window.storage.set("tc:rec:__ini", JSON.stringify({ini}), Backend.mode==="shared");
     else if(Backend.mode==="upstash")
       Backend.redis(["SET","tc:rec:__ini",JSON.stringify({ini})]);
+    else if(Backend.mode==="ls")
+      localStorage.setItem("tc:rec:__ini", JSON.stringify({ini}));
   }catch(e){}
   const p=PENDING; PENDING=null;
   const btn=$("#b_inisave");
@@ -1785,7 +1799,12 @@ async function submitInitials(){
 $("#b_inisave").onclick = () => submitInitials();
 
 /* character select UI *//* character select UI */
-let selChar = localStorage.getItem("tc_char") || "mango";
+const LS = {
+  get(k){ try{ return localStorage.getItem(k); }catch(e){ return null; } },
+  set(k,v){ try{ localStorage.setItem(k,v); return true; }catch(e){ return false; } },
+  del(k){ try{ localStorage.removeItem(k); }catch(e){} }
+};
+let selChar = LS.get("tc_char") || "mango";
 let selTrack = 0;
 function buildCharGrid(){
   const g=$("#charGrid"); g.innerHTML="";
@@ -1797,7 +1816,7 @@ function buildCharGrid(){
         ${bar("SPD",c.top,0.9,1.15)}${bar("ACC",c.acc,0.8,1.25)}${bar("GRIP",c.hand,0.84,1.22)}
       </div>
       <div class="ab">${c.ability}</div>`;
-    d.onclick=()=>{ selChar=c.id; localStorage.setItem("tc_char",c.id); buildCharGrid(); SFX.tick(); Net.pushSelf(); };
+    d.onclick=()=>{ selChar=c.id; LS.set("tc_char",c.id); buildCharGrid(); SFX.tick(); Net.pushSelf(); };
     g.appendChild(d);
   });
 }
@@ -1839,11 +1858,12 @@ const CONFIG = {
 };
 
 const Backend = {
-  mode:"local",          // api | upstash | shared | device | local
+  mode:"local",          // api | upstash | shared | device | ls | local
   mem:{},
+  detail:"",             // human-readable reason, shown on the records screen
   label(){
     return {api:"Shared board", upstash:"Shared board", shared:"Shared board",
-            device:"This device", local:"This session"}[this.mode];
+            device:"This device", ls:"This device", local:"This session"}[this.mode];
   },
   shared(){ return this.mode==="api" || this.mode==="upstash" || this.mode==="shared"; },
 
@@ -1851,8 +1871,23 @@ const Backend = {
     // 1. serverless proxy (token stays on the server)
     try{
       const r = await fetch(CONFIG.API_PATH+"?ping=1", {method:"GET"});
-      if(r.ok){ const j=await r.json(); if(j && j.ok){ this.mode="api"; return; } }
-    }catch(e){}
+      if(r.ok){
+        const j=await r.json();
+        if(j && j.ok){ this.mode="api"; this.detail="Shared board via "+CONFIG.API_PATH+"."; return; }
+      }
+      if(r.status===503){
+        this.detail="Found "+CONFIG.API_PATH+", but no KV store is connected. In Vercel open "+
+                    "Storage, connect an Upstash Redis database to this project, then redeploy.";
+      } else if(r.status===404){
+        this.detail="No "+CONFIG.API_PATH+" endpoint. Commit api/records.js to the repo root, "+
+                    "beside index.html, to share one board with friends.";
+      } else {
+        this.detail=CONFIG.API_PATH+" replied HTTP "+r.status+".";
+      }
+    }catch(e){
+      this.detail="Couldn't reach "+CONFIG.API_PATH+" — add api/records.js to your repo "+
+                  "to share a board with friends.";
+    }
     // 2. Upstash straight from the page
     if(CONFIG.UPSTASH_URL && CONFIG.UPSTASH_TOKEN){
       try{
@@ -1864,13 +1899,19 @@ const Backend = {
     if(window.storage && window.storage.set){
       try{
         await window.storage.set("tc:probe","1",true);
-        this.mode="shared"; return;
+        this.mode="shared"; this.detail="Shared board via this link's storage."; return;
       }catch(e){}
       try{
         await window.storage.set("tc:probe","1",false);
         this.mode="device"; return;
       }catch(e){}
     }
+    // 4. plain browser storage — keeps times on this device between visits
+    try{
+      localStorage.setItem("tc:probe","1");
+      localStorage.removeItem("tc:probe");
+      this.mode="ls"; return;
+    }catch(e){}
     this.mode="local";
   },
 
@@ -1903,6 +1944,10 @@ const Backend = {
         const r=await window.storage.get(k, this.mode==="shared");
         return JSON.parse(r.value);
       }
+      if(this.mode==="ls"){
+        const v=localStorage.getItem(k);
+        return v ? JSON.parse(v) : null;
+      }
     }catch(e){}
     return this.mem[k]||null;
   },
@@ -1919,10 +1964,11 @@ const Backend = {
         });
         if(r.ok) return await r.json();
       }
-      if(this.mode==="upstash"||this.mode==="shared"||this.mode==="device"){
+      if(this.mode==="upstash"||this.mode==="shared"||this.mode==="device"||this.mode==="ls"){
         const cur = (await this.load(trackId)) || {board:[], ghost:null};
         const merged = mergeBoard(cur, entry, ghost);
         if(this.mode==="upstash") await this.redis(["SET",k,JSON.stringify(merged)]);
+        else if(this.mode==="ls") localStorage.setItem(k, JSON.stringify(merged));
         else await window.storage.set(k, JSON.stringify(merged), this.mode==="shared");
         return merged;
       }
@@ -2291,12 +2337,13 @@ function showResults(){
         `<div>${best?"Best lap":"Lap "+(i+1)}</div><div class="tm">${fmtTime(lt)}</div>`;
       el.appendChild(d);
     });
-    const rec=bestMs(t.id);
-    const r=document.createElement("div");
-    r.className="rrow";
-    r.innerHTML=`<div class="pl">🏅</div><div class="em">👑</div><div>Track record</div>`+
-      `<div class="tm">${rec!=null?fmtTime(rec):"—"}</div>`;
-    el.appendChild(r);
+    recFor(t.id).board.slice(0,3).forEach((b,i)=>{
+      const r=document.createElement("div");
+      r.className="rrow";
+      r.innerHTML=`<div class="pl">${i+1}${SUF(i+1)}</div><div class="em">${CHAR(b.ch).em}</div>`+
+        `<div>${b.ini}${b.ini===MY_INI?" ★":""}</div><div class="tm">${fmtTime(b.ms)}</div>`;
+      el.appendChild(r);
+    });
     $("#gpBlock").style.display="none";
     $("#gpBtns").style.display="none";
     $("#resBtns").style.display="";
@@ -2487,10 +2534,13 @@ function updateHUD(dt){
   let html = "LAP <b>"+fmtTime(cur)+"</b>";
   if(RACE.bestLapMs!=null) html += "<br>BEST "+fmtTime(RACE.bestLapMs);
   if(rec!=null) html += "<br>REC "+fmtTime(rec);
-  if(RACE.ghost && RACE.ghostDelta!=null){
-    const d=RACE.ghostDelta, up=d<0;
-    html += '<br><span class="dlt '+(up?"up":"dn")+'">'+(up?"−":"+")+
-            (Math.abs(d)/1000).toFixed(2)+"</span>";
+  if(RACE.ghost){
+    html += "<br>\uD83D\uDC7B "+RACE.ghost.ini;
+    if(RACE.ghostDelta!=null){
+      const d=RACE.ghostDelta, up=d<0;
+      html += ' <span class="dlt '+(up?"up":"dn")+'">'+(up?"−":"+")+
+              (Math.abs(d)/1000).toFixed(2)+"</span>";
+    }
   }
   $("#lapBox").innerHTML = html;
   drawMini();
@@ -2773,6 +2823,11 @@ $("#b_solo").onclick=()=>{ SFX.unlock(); Net.on=false; mpMode=false; gpMode=fals
 $("#b_tt").onclick=()=>{ SFX.unlock(); Net.on=false; mpMode=false; gpMode=false; ttMode=true; show("#s_char"); };
 $("#b_recs").onclick=()=>{ renderRecords(); show("#s_recs"); };
 $("#b_recsback").onclick=()=>show("#s_title");
+$("#b_recsref").onclick=async ()=>{
+  const b=$("#b_recsref"); b.textContent="…";
+  await refreshRecords();
+  b.textContent="🔄 Refresh";
+};
 $("#b_gpstart").onclick=()=>{ SFX.unlock(); Net.on=false; mpMode=false; ttMode=false; gpMode=true; show("#s_char"); };
 $("#b_mp").onclick=async ()=>{
   SFX.unlock(); mpMode=true; gpMode=false; ttMode=false;
